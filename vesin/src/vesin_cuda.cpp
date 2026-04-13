@@ -2,7 +2,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-
+#include <iostream>
 #include <algorithm>
 #include <optional>
 #include <stdexcept>
@@ -38,9 +38,66 @@ const unsigned char CUDA_CELL_LIST_CODE[] = {
 
 // Maximum number of cells (limited by single-block prefix sum)
 static constexpr size_t MAX_CELLS = 8192;
-// Minimum particles per cell target for good GPU utilization
-// Higher values = fewer cells = more work per block but larger search range
-static constexpr size_t MIN_PARTICLES_PER_CELL = 128;
+
+// Default minimum particles per cell target for good GPU utilization.
+// Lower values create more cells and reduce per-cell neighbor work, which is
+// beneficial on larger systems where more coarse grids become too dense.
+static constexpr size_t MIN_PARTICLES_PER_CELL_DEFAULT = 32;
+
+// Read minimum particles per cell from environment variable if present.
+// Environment variable: VESIN_CUDA_MIN_PARTICLES_PER_CELL
+// If not set, the default above is used. Invalid values cause a runtime error.
+static size_t get_min_particles_per_cell() {
+    const char* env = std::getenv("VESIN_CUDA_MIN_PARTICLES_PER_CELL");
+    if (env == nullptr) {
+        return MIN_PARTICLES_PER_CELL_DEFAULT;
+    }
+
+    auto length = std::strlen(env);
+    char* end = nullptr;
+    errno = 0;
+    long long parsed = std::strtoll(env, &end, 10);
+    if (errno != 0 || end != env + length || parsed <= 0) {
+        throw std::runtime_error(
+            "Invalid value for VESIN_CUDA_MIN_PARTICLES_PER_CELL: '" +
+            std::string(env) + "'"
+        );
+    }
+
+
+
+    return static_cast<size_t>(parsed);
+}
+
+// Read max pairs per point from environment variable if present, otherwise compute default.
+// Environment variable: VESIN_CUDA_MAX_PAIRS_PER_POINT
+// Default is max(VESIN_CUDA_AT_LEAST_PAIRS_PER_POINT, cutoff^3).
+static size_t get_max_pairs_per_point(double cutoff) {
+    size_t default_value = std::max(
+        static_cast<size_t>(VESIN_CUDA_AT_LEAST_PAIRS_PER_POINT),
+        static_cast<size_t>(std::ceil(std::pow(cutoff, 3)))
+    );
+
+    const char* env = std::getenv("VESIN_CUDA_MAX_PAIRS_PER_POINT");
+    if (env == nullptr) {
+        return default_value;
+    }
+
+    auto length = std::strlen(env);
+    char* end = nullptr;
+    errno = 0;
+    long long parsed = std::strtoll(env, &end, 10);
+    if (errno != 0 || end != env + length || parsed <= 0) {
+        throw std::runtime_error(
+            "Invalid value for VESIN_CUDA_MAX_PAIRS_PER_POINT: '" +
+            std::string(env) + "'"
+        );
+    }
+
+
+
+    return static_cast<size_t>(parsed);
+}
 
 // Helper functions for CPU-side vector math
 static inline double cpu_dot3(const double* a, const double* b) {
@@ -470,10 +527,7 @@ void vesin::cuda::neighbors(
     }
 
     auto* extras = vesin::cuda::get_cuda_extras(&neighbors);
-    size_t max_pairs_per_point = std::max(
-        static_cast<size_t>(VESIN_CUDA_AT_LEAST_PAIRS_PER_POINT),
-        static_cast<size_t>(std::ceil(std::pow(options.cutoff, 3)))
-    );
+    size_t max_pairs_per_point = get_max_pairs_per_point(options.cutoff);
 
     if (extras->allocated_device_id != device_id) {
         // first switch to previous device
@@ -495,21 +549,6 @@ void vesin::cuda::neighbors(
         auto saved_device = extras->allocated_device_id;
         reset(neighbors);
         extras->allocated_device_id = saved_device;
-
-        auto* env_max_pairs = std::getenv("VESIN_CUDA_MAX_PAIRS_PER_POINT");
-        if (env_max_pairs != nullptr) {
-            auto length = std::strlen(env_max_pairs);
-            char* end = nullptr;
-            errno = 0;
-            auto parsed_max_pairs_per_point = std::strtoll(env_max_pairs, &end, 10);
-            if (errno != 0 || end != env_max_pairs + length || parsed_max_pairs_per_point <= 0) {
-                throw std::runtime_error(
-                    "Invalid value for VESIN_CUDA_MAX_PAIRS_PER_POINT: '" +
-                    std::string(env_max_pairs) + "'"
-                );
-            }
-            max_pairs_per_point = static_cast<size_t>(parsed_max_pairs_per_point);
-        }
 
         extras->max_pairs = n_points * max_pairs_per_point;
 
@@ -636,7 +675,7 @@ void vesin::cuda::neighbors(
         auto& cl = extras->cell_list;
 
         int32_t max_cells_int = static_cast<int32_t>(MAX_CELLS);
-        int32_t min_particles_per_cell = MIN_PARTICLES_PER_CELL;
+        int32_t min_particles_per_cell = static_cast<int32_t>(get_min_particles_per_cell());
 
         size_t THREADS_PER_BLOCK = 256;
         size_t num_blocks_points = (n_points + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
