@@ -1,29 +1,15 @@
 #!/usr/bin/env python
-"""Benchmark vesin CUDA with varying VESIN_CUDA_MIN_PARTICLES_PER_CELL values.
-
-This script tests how the MIN_PARTICLES_PER_CELL parameter affects performance
-for different system sizes and cutoffs.
-"""
-
 import os
-import time
 
+import cupy as cp
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-
-
-try:
-    import cupy as cp
-except ImportError:
-    print("CuPy not available - required for CUDA benchmarks")
-    exit(1)
 
 from vesin import NeighborList
 
 
 def generate_system(n_atoms, density, seed=42):
-    """Generate random atomic positions in a cubic box."""
     box_size = (n_atoms / density) ** (1 / 3)
     rng = np.random.default_rng(seed)
     positions = rng.random((n_atoms, 3)) * box_size
@@ -32,7 +18,6 @@ def generate_system(n_atoms, density, seed=42):
 
 
 def benchmark_cuda(positions_gpu, box_gpu, cutoff, n_warmup=10, n_runs=25):
-    """Benchmark CUDA neighbor list computation."""
     nl = NeighborList(cutoff=cutoff, full_list=True)
 
     # Warmup
@@ -40,7 +25,6 @@ def benchmark_cuda(positions_gpu, box_gpu, cutoff, n_warmup=10, n_runs=25):
         nl.compute(positions_gpu, box_gpu, periodic=True, quantities="ij")
     cp.cuda.Stream.null.synchronize()
 
-    # Benchmark using CUDA events for accurate timing
     start_event = cp.cuda.Event()
     end_event = cp.cuda.Event()
     times = []
@@ -59,11 +43,10 @@ def run_benchmarks(
     n_atoms_list,
     cutoffs,
     min_particles_values,
-    density=0.05,
+    density=1.0,
     n_warmup=10,
     n_runs=25,
 ):
-    """Run benchmarks for all configurations."""
     results = {}
 
     for cutoff in cutoffs:
@@ -106,7 +89,6 @@ def run_benchmarks(
                     print(f"   MIN_PARTICLES_PER_CELL={min_particles:4d}: ERROR ({e})")
                     results[cutoff][n_atoms][min_particles] = (np.nan, np.nan)
 
-    # Clean up environment variable
     if "VESIN_CUDA_MIN_PARTICLES_PER_CELL" in os.environ:
         del os.environ["VESIN_CUDA_MIN_PARTICLES_PER_CELL"]
 
@@ -114,7 +96,6 @@ def run_benchmarks(
 
 
 def print_summary(results, min_particles_values):
-    """Print a summary table of results."""
     print("\n")
     print("=" * 80)
     print("SUMMARY")
@@ -148,7 +129,6 @@ def print_summary(results, min_particles_values):
 def plot_results(
     results, min_particles_values, output_file="min_particles_per_cell_benchmark.png"
 ):
-    """Create scaling plots comparing different MIN_PARTICLES_PER_CELL values."""
     sns.set_theme(style="whitegrid")
 
     cutoffs = list(results.keys())
@@ -205,15 +185,13 @@ def plot_results(
     axes[0].set_ylabel("Time (ms)", fontsize=11)
 
     fig.suptitle(
-        "Vesin CUDA: Scaling with VESIN_CUDA_MIN_PARTICLES_PER_CELL",
+        "Scaling with VESIN_CUDA_MIN_PARTICLES_PER_CELL",
         fontsize=13,
         fontweight="bold",
     )
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=150, bbox_inches="tight")
-    print(f"\nPlot saved to {output_file}")
-    plt.show()
+    plt.savefig(output_file, dpi=600, bbox_inches="tight")
 
 
 def plot_speedup(
@@ -222,7 +200,6 @@ def plot_speedup(
     baseline=32,
     output_file="min_particles_per_cell_speedup.png",
 ):
-    """Create speedup plots relative to a baseline MIN_PARTICLES_PER_CELL value."""
     sns.set_theme(style="whitegrid")
 
     cutoffs = list(results.keys())
@@ -287,23 +264,20 @@ def plot_speedup(
     axes[0].set_ylabel(f"Speedup vs baseline ({baseline})", fontsize=11)
 
     fig.suptitle(
-        "Vesin CUDA: Speedup with different VESIN_CUDA_MIN_PARTICLES_PER_CELL",
+        "Speedup with different VESIN_CUDA_MIN_PARTICLES_PER_CELL",
         fontsize=13,
         fontweight="bold",
     )
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=150, bbox_inches="tight")
-    print(f"Speedup plot saved to {output_file}")
-    plt.show()
+    plt.savefig(output_file, dpi=600, bbox_inches="tight")
 
 
 if __name__ == "__main__":
-    # Configuration
-    n_atoms_list = [500, 1000, 2000, 5000, 10000, 20000, 50000]
+    n_atoms_list = [500, 1000, 2000, 5000, 10000, 20000, 50000, 100000]
     cutoffs = [3.0, 6.0, 12.0]
-    min_particles_values = [8, 16, 32, 64, 128, 256]
-    density = 0.05
+    min_particles_values = [4, 8, 16, 32, 64, 128, 256, 512]
+    density = 0.1
 
     print("Benchmark: VESIN_CUDA_MIN_PARTICLES_PER_CELL")
     print("=" * 60)

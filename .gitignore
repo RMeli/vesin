@@ -8,3 +8,5 @@ __pycache__/
 
 vesin-single-build.cpp
 vesin-single-build-v*.tar.gz
+
+*.png
